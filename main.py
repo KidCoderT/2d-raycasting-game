@@ -9,7 +9,9 @@ WIDTH, HEIGHT = 1280, 720
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 clock = pygame.time.Clock()
 
-shape_list = [
+pos = tuple[int, int] | tuple[float, float]
+
+shape_list: list[list[pos]] = [
     [(120, 78), (108, 198), (192, 309), (283, 103)],
     [(105, 386), (162, 468), (90, 543)],
     [(360, 421), (316, 568), (541, 639), (498, 489)],
@@ -35,7 +37,7 @@ class Wall:
         pygame.draw.line(screen, color, self.start_pt, self.end_pt)
 
     @classmethod
-    def decompose_polygon(self, shape: list[tuple[int, int]]) -> list[Wall]:
+    def decompose_polygon(cls, shape: list[pos]) -> list[Wall]:
         lines = []
         for i in range(0, len(shape)):
             lines.append(Wall(shape[i - 1], shape[i]))
@@ -43,7 +45,7 @@ class Wall:
 
 
 class Ray:
-    def __init__(self, origin: tuple[int, int], towards: tuple[int, int]):
+    def __init__(self, origin: pos, towards: pos):
         self.origin = origin
         self.towards = towards
 
@@ -88,18 +90,17 @@ class Ray:
 
         return (
             (x, y),
-            math.sqrt((x - x1) ** 2 + (y - y1) ** 2),  # dist from origin of ray
-            pygame.Vector2(x, y).normalize(),
+            T1,  # dist from origin of ray
         )
 
     @classmethod
-    def from_angle(self, origin, azimutal_angle):
+    def from_angle(cls, origin, azimutal_angle):
         vector = pygame.Vector2()
         vector.from_polar((1, azimutal_angle))
         assert vector.is_normalized()
         og_vec = pygame.Vector2(*origin)
         towards_vec = og_vec + vector
-        return Ray(origin, towards_vec.xy)
+        return Ray(origin, (towards_vec.x, towards_vec.y))
 
 
 walls: list[Wall] = [
@@ -150,7 +151,7 @@ def main():
                 if out is None:
                     continue
 
-                p, dist, _ = out
+                p, dist = out
                 if dist < min_dist:
                     min_dist = dist
                     point = p
