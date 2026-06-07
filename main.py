@@ -127,17 +127,17 @@ def main():
                 running = False
 
         # fill the screen with a color to wipe away anything from last frame
-        screen.fill("white")
+        screen.fill("black")
 
         # RENDER YOUR GAME HERE
         for shape in shape_list:
-            pygame.draw.polygon(screen, "grey", shape, 2)
+            pygame.draw.polygon(screen, "white", shape, 2)
 
         for line in walls:
-            line.render(screen, "red")
+            line.render(screen, "grey")
 
         # ray = Ray((WIDTH / 2, HEIGHT / 2), (x, y))
-        n = 50
+        n = 300
         rays = [Ray.from_angle((x, y), (360 / n) * i) for i in range(n)]
         # ray.render(screen, 700)
 
