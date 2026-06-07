@@ -3,7 +3,7 @@ import pygame
 
 pygame.init()
 
-screen = pygame.display.set_mode((1280, 720))
+screen = pygame.display.set_mode((1280 / 2, 720))
 clock = pygame.time.Clock()
 
 
@@ -36,19 +36,23 @@ def create_level():
             point_list = []
 
         # RENDER YOUR GAME HERE
-        pygame.draw.circle(screen, 'red', (x, y), 5)
+        pygame.draw.circle(screen, "red", (x, y), 5)
 
         for shape_points in shapes_list:
             for point in shape_points:
-                pygame.draw.circle(screen, 'red', (point[0], point[1]), 5)
+                pygame.draw.circle(screen, "red", (point[0], point[1]), 5)
 
         for point in point_list:
-            pygame.draw.circle(screen, 'yellow', (point[0], point[1]), 5)
+            pygame.draw.circle(screen, "yellow", (point[0], point[1]), 5)
 
         pygame.display.update()
         clock.tick(60)  # limits FPS to 60
         i += 1
-    
+
     print(shapes_list)
     pygame.quit()
     sys.exit()
+
+
+if __name__ == "__main__":
+    create_level()

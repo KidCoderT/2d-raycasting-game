@@ -7,18 +7,18 @@ pygame.init()
 
 WIDTH, HEIGHT = 1280, 720
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
+map = pygame.Surface((WIDTH / 2, HEIGHT))
+render = pygame.Surface((WIDTH / 2, HEIGHT))
 clock = pygame.time.Clock()
 
 pos = tuple[int, int] | tuple[float, float]
 
 shape_list: list[list[pos]] = [
-    [(120, 78), (108, 198), (192, 309), (283, 103)],
-    [(105, 386), (162, 468), (90, 543)],
-    [(360, 421), (316, 568), (541, 639), (498, 489)],
-    [(748, 412), (688, 556), (878, 563), (958, 399)],
-    [(852, 206), (875, 315), (1145, 230)],
-    [(1035, 56), (1008, 105), (1065, 106)],
-    [(507, 75), (766, 74), (771, 45), (507, 42)],
+    [(221, 90), (93, 157), (119, 217), (252, 152)],
+    [(126, 441), (238, 570), (196, 606), (87, 475)],
+    [(560, 488), (441, 596), (474, 627), (596, 544)],
+    [(479, 130), (510, 165), (521, 242), (559, 103), (612, 204)],
+    [(81, 311), (79, 367), (130, 340)],
 ]
 
 
@@ -103,6 +103,36 @@ class Ray:
         return Ray(origin, (towards_vec.x, towards_vec.y))
 
 
+class Player:
+    def __init__(self, pos, speed=300, rot_speed=3):
+        self.direction = 0  # right & clockwise direction
+        self.position = pygame.Vector2(*pos)
+        self.speed = speed
+        self.rot_speed = rot_speed
+
+    def update_position(self, dt):
+        keys = pygame.key.get_pressed()
+        speed = 0
+
+        if keys[pygame.K_w] or keys[pygame.K_UP]:
+            speed = self.speed
+        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+            speed = self.speed * -0.3
+        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+            self.direction -= self.rot_speed
+        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+            self.direction += self.rot_speed
+
+        vector = pygame.Vector2()
+        vector.from_polar((speed, self.direction))
+
+        self.position.y += vector.y * dt
+        self.position.x += vector.x * dt
+
+    def render(self, screen: pygame.Surface):
+        pygame.draw.circle(screen, "blue", self.position, 10)
+
+
 walls: list[Wall] = [
     Wall((0, 0), (WIDTH, 0)),
     Wall((0, 0), (0, HEIGHT)),
@@ -113,12 +143,15 @@ walls: list[Wall] = [
 for shape in shape_list:
     walls.extend(Wall.decompose_polygon(shape))
 
+player = Player((WIDTH / 4, HEIGHT / 2))
+
 
 def main():
     running = True
+    dt = 0
 
     while running:
-        x, y = pygame.mouse.get_pos()
+        mx, my = pygame.mouse.get_pos()
 
         # poll for events
         # pygame.QUIT event means the user clicked X to close your window
@@ -127,18 +160,21 @@ def main():
                 running = False
 
         # fill the screen with a color to wipe away anything from last frame
-        screen.fill("black")
+        map.fill("black")
 
         # RENDER YOUR GAME HERE
         for shape in shape_list:
-            pygame.draw.polygon(screen, "white", shape, 2)
+            pygame.draw.polygon(map, "white", shape, 2)
 
         for line in walls:
-            line.render(screen, "grey")
+            line.render(map, "grey")
+
+        player.update_position(dt)
 
         # ray = Ray((WIDTH / 2, HEIGHT / 2), (x, y))
         n = 300
-        rays = [Ray.from_angle((x, y), (360 / n) * i) for i in range(n)]
+        rays = [Ray.from_angle(player.position.xy, (360 / n) * i) for i in range(n)]
+        # rays = [Ray.from_angle(player.position.xy, player.direction)]
         # ray.render(screen, 700)
 
         for ray in rays:
@@ -157,11 +193,16 @@ def main():
                     point = p
 
             if point is not None:
-                ray.render(screen, min_dist)
-                pygame.draw.circle(screen, "red", point, 5)
+                ray.render(map, min_dist)
+                pygame.draw.circle(map, "red", point, 5)
+
+        player.render(map)
+
+        screen.blit(map, (0, 0))
+        screen.blit(render, (WIDTH / 2, 0))
 
         pygame.display.update()
-        clock.tick(60)  # limits FPS to 60
+        dt = clock.tick(60) / 1000
 
     pygame.quit()
     sys.exit()
