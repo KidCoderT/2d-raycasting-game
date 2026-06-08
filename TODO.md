@@ -1,11 +1,11 @@
 # Todo
 
 ## Phase 1: The Pseudo-3D Render Engine (The Core Illusion)
-- [ ] **Limit the Field of View (FOV):** Restrict rays to a fixed cone (e.g., 60°) centered around player's viewing angle instead of 360°
-- [ ] **Fix Fish-Eye Distortion:** Apply cosine correction to raw ray lengths based on relative angle to player view vector
-- [ ] **Split-Screen / Fullscreen Toggle:** Setup 3D viewport mapping each ray to a vertical column slice on screen
+- [x] **Limit the Field of View (FOV):** Restrict rays to a fixed cone (e.g., 60°) centered around player's viewing angle instead of 360°
+- [x] **Fix Fish-Eye Distortion:** Apply cosine correction to raw ray lengths based on relative angle to player view vector
+- [x] **Split-Screen / Fullscreen Toggle:** Setup 3D viewport mapping each ray to a vertical column slice on screen
 - [ ] **Wall Scaling Logic:** Calculate slice rendering height dynamically based on the corrected distance values
-- [ ] **Depth Shading:** Implement linear interpolation (`lerp`) to make farther wall slices darker/fogged
+- [x] **Depth Shading:** Implement linear interpolation (`lerp`) to make farther wall slices darker/fogged
 - [ ] **Environment Background:** Draw static skybox rectangle (top-half) and floor rectangle (bottom-half)
 
 ## Phase 2: Spatial Architecture & Movement Mechanics

@@ -2,6 +2,7 @@ import math
 import sys
 
 import pygame
+from pygame.math import clamp
 
 pygame.init()
 
@@ -104,11 +105,16 @@ class Ray:
 
 
 class Player:
-    def __init__(self, pos, speed=300, rot_speed=3):
+    def __init__(self, pos, fov=60, speed=300, rot_speed=3):
         self.direction = 0  # right & clockwise direction
         self.position = pygame.Vector2(*pos)
         self.speed = speed
         self.rot_speed = rot_speed
+        self.fov = fov
+
+        self.rays = []
+        self.wall_distances = []
+        self.wall_positions = []
 
     def update_position(self, dt):
         keys = pygame.key.get_pressed()
@@ -129,21 +135,57 @@ class Player:
         self.position.y += vector.y * dt
         self.position.x += vector.x * dt
 
+    def create_rays(self, walls, n=50):
+        # ray = Ray((WIDTH / 2, HEIGHT / 2), (x, y))
+        self.rays = [
+            Ray.from_angle(
+                player.position.xy,
+                (player.direction - (player.fov / 2)) + (player.fov / n) * i,
+            )
+            for i in range(n)
+        ]
+        self.wall_distances = []
+        self.wall_positions = []
+        # rays = [Ray.from_angle(player.position.xy, player.direction)]
+
+        for ray in self.rays:
+            # ray.render(screen, 700, "grey")
+            min_dist = math.inf
+            point = None
+            for wall in walls:
+                out = ray.cast(wall)
+
+                if out is None:
+                    continue
+
+                p, dist = out
+                if dist < min_dist:
+                    min_dist = dist
+                    point = p
+
+            self.wall_positions.append(point)
+            self.wall_distances.append(min_dist)
+
+        return self.rays, self.wall_positions, self.wall_distances
+
     def render(self, screen: pygame.Surface):
         pygame.draw.circle(screen, "blue", self.position, 10)
 
 
 walls: list[Wall] = [
-    Wall((0, 0), (WIDTH, 0)),
-    Wall((0, 0), (0, HEIGHT)),
-    Wall((WIDTH, HEIGHT), (0, HEIGHT)),
-    Wall((WIDTH, HEIGHT), (WIDTH, 0)),
+    Wall((-1, -1), (WIDTH / 2, -1)),
+    Wall((-1, -1), (-1, HEIGHT)),
+    Wall((WIDTH / 2, HEIGHT), (-1, HEIGHT)),
+    Wall((WIDTH / 2, HEIGHT), (WIDTH / 2, -1)),
 ]
 
 for shape in shape_list:
     walls.extend(Wall.decompose_polygon(shape))
 
-player = Player((WIDTH / 4, HEIGHT / 2))
+player = Player((WIDTH / 4, HEIGHT / 2), 60, 200)
+no_of_rays = 200
+max_depth = 700
+wall_size = WIDTH
 
 
 def main():
@@ -171,32 +213,42 @@ def main():
 
         player.update_position(dt)
 
-        # ray = Ray((WIDTH / 2, HEIGHT / 2), (x, y))
-        n = 300
-        rays = [Ray.from_angle(player.position.xy, (360 / n) * i) for i in range(n)]
-        # rays = [Ray.from_angle(player.position.xy, player.direction)]
-        # ray.render(screen, 700)
+        rays, wall_positions, wall_distances = player.create_rays(walls, no_of_rays)
+        corrected_distances = []
+        wall_heights = []
+        alpha_values = []
 
-        for ray in rays:
-            # ray.render(screen, 700, "grey")
-            min_dist = math.inf
-            point = None
-            for wall in walls:
-                out = ray.cast(wall)
+        for i in range(len(rays)):
+            if wall_positions[i] is not None:
+                rays[i].render(map, wall_distances[i])
+                pygame.draw.circle(map, "red", wall_positions[i], 5)
 
-                if out is None:
-                    continue
+            correct_dist = wall_distances[i] * math.cos(
+                (i * (player.fov / no_of_rays) - (player.fov / 2)) * (math.pi / 180)
+            )
 
-                p, dist = out
-                if dist < min_dist:
-                    min_dist = dist
-                    point = p
+            wall_height = (wall_size*15) / correct_dist
 
-            if point is not None:
-                ray.render(map, min_dist)
-                pygame.draw.circle(map, "red", point, 5)
+            factor =  pygame.math.clamp(1 - (wall_distances[i]/ max_depth), 0, 1)
 
+
+            corrected_distances.append(correct_dist)
+            wall_heights.append(wall_height)
+            alpha_values.append(factor * 255)
+        
         player.render(map)
+
+        # MAKEING THE PLAYER VIEW
+        render.fill("black")
+
+        box_width = (WIDTH / 2) / no_of_rays
+        for i in range(no_of_rays):
+            wall_top = (HEIGHT / 2) - (wall_heights[i] / 2)
+            pygame.draw.rect(
+                render,
+                pygame.Color(alpha_values[i],alpha_values[i],alpha_values[i]),
+                pygame.Rect(i * box_width, wall_top, box_width+1, wall_heights[i]),
+            )
 
         screen.blit(map, (0, 0))
         screen.blit(render, (WIDTH / 2, 0))
