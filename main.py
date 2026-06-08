@@ -1,4 +1,5 @@
 import math
+import random
 import sys
 
 import pygame
@@ -6,10 +7,21 @@ from pygame.math import clamp
 
 pygame.init()
 
-WIDTH, HEIGHT = 1280, 720
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-map = pygame.Surface((WIDTH / 2, HEIGHT))
-render = pygame.Surface((WIDTH / 2, HEIGHT))
+# TODO: MAKE THE WIDTH AND HEIGHT BASED ON TILE_SIZE, ROW AND COL CONST
+TILE_SIZE = 40
+SCREEN_WIDTH, HEIGHT = 1280, 720  # HCF = 80
+WIDTH = SCREEN_WIDTH // 2
+ROWS, COLS = HEIGHT // TILE_SIZE, WIDTH // TILE_SIZE
+print(ROWS, COLS)
+
+TOP = 0
+RIGHT = 1
+BOTTOM = 2
+LEFT = 3
+
+screen = pygame.display.set_mode((SCREEN_WIDTH, HEIGHT))
+map = pygame.Surface((WIDTH, HEIGHT))
+render = pygame.Surface((WIDTH, HEIGHT))
 clock = pygame.time.Clock()
 
 pos = tuple[int, int] | tuple[float, float]
@@ -21,6 +33,8 @@ shape_list: list[list[pos]] = [
     [(479, 130), (510, 165), (521, 242), (559, 103), (612, 204)],
     [(81, 311), (79, 367), (130, 340)],
 ]
+
+my_font = pygame.font.SysFont("Fira Code", 14)
 
 
 class Wall:
@@ -123,7 +137,7 @@ class Player:
         if keys[pygame.K_w] or keys[pygame.K_UP]:
             speed = self.speed
         if keys[pygame.K_s] or keys[pygame.K_DOWN]:
-            speed = self.speed * -0.3
+            speed = self.speed * -0.8
         if keys[pygame.K_a] or keys[pygame.K_LEFT]:
             self.direction -= self.rot_speed
         if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
@@ -172,20 +186,179 @@ class Player:
         pygame.draw.circle(screen, "blue", self.position, 10)
 
 
+class Cell:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.index = y * COLS + x
+        self.walls = [True, True, True, True]  # TOP, RIGHT, BOTTOM, LEFT
+
+        self.visited = False
+
+    @property
+    def cell_center(self):
+        return ((self.x + 0.5) * TILE_SIZE, (self.y + 0.5) * TILE_SIZE)
+
+    @property
+    def cell_top_left(self):
+        return ((self.x) * TILE_SIZE, (self.y) * TILE_SIZE)
+
+    def render(
+        self,
+        screen: pygame.Surface,
+        fill=False,
+        width=1,
+        line_color="white",
+        fill_color="blue",
+        DEBUG=False,
+    ):
+        points = []
+        if self.walls[TOP]:
+            points.append(
+                (
+                    (self.x * TILE_SIZE, self.y * TILE_SIZE),
+                    ((self.x + 1) * TILE_SIZE, self.y * TILE_SIZE),
+                )
+            )
+        if self.walls[RIGHT]:
+            points.append(
+                (
+                    ((self.x + 1) * TILE_SIZE, self.y * TILE_SIZE),
+                    ((self.x + 1) * TILE_SIZE, (self.y + 1) * TILE_SIZE),
+                )
+            )
+        if self.walls[BOTTOM]:
+            points.append(
+                (
+                    (self.x * TILE_SIZE, (self.y + 1) * TILE_SIZE),
+                    ((self.x + 1) * TILE_SIZE, (self.y + 1) * TILE_SIZE),
+                )
+            )
+        if self.walls[LEFT]:
+            points.append(
+                (
+                    (((self.x) * TILE_SIZE), self.y * TILE_SIZE),
+                    (((self.x) * TILE_SIZE), (self.y + 1) * TILE_SIZE),
+                )
+            )
+
+        if fill:
+            pygame.draw.rect(
+                screen,
+                fill_color,
+                (self.x * TILE_SIZE, self.y * TILE_SIZE, TILE_SIZE, TILE_SIZE),
+            )
+
+        for point in points:
+            pygame.draw.line(screen, line_color, point[0], point[1], width)
+
+        if DEBUG:
+            text_surface = my_font.render(str(self.index), True, "white")
+            text_rect = text_surface.get_rect()
+            text_rect.center = ((self.x + 0.5) * TILE_SIZE, (self.y + 0.5) * TILE_SIZE)
+
+            screen.blit(text_surface, text_rect)
+
+
+class Maze:
+    @staticmethod
+    def index_to_pos(index):
+        x = index % COLS
+        y = index // COLS
+        return x, y
+
+    @staticmethod
+    def pos_to_index(x, y):
+        return y * COLS + x
+
+    def __init__(self, width, height):
+        self.cells: list[Cell] = []
+        # for i in range(ROWS):
+        #     for j in range(COLS):
+        #         self.cells.append(Cell(i, j))
+        for index in range(ROWS * COLS):
+            cell = Cell(*Maze.index_to_pos(index))
+            assert cell.index == index
+            self.cells.append(cell)
+
+    def render(self, screen: pygame.Surface):
+        for cell in self.cells:
+            cell.render(screen, DEBUG=True)
+
+    def highlight_cell(self, screen: pygame.Surface, index, color="red", DEBUG=False):
+        self.cells[index].render(
+            screen,
+            fill=True,
+            width=3,
+            line_color="white",
+            fill_color=color,
+            DEBUG=DEBUG,
+        )
+
+    def highlight_cells(
+        self, screen: pygame.Surface, indices, color="red", DEBUG=False
+    ):
+        for index in indices:
+            self.highlight_cell(screen, index, color, DEBUG)
+
+    def get_random_cell(self):
+        index = random.randint(0, len(self.cells) - 1)
+        return self.cells[index], index
+
+    def get_cell_center(self, index):
+        x, y = Maze.index_to_pos(index)
+        return ((x + 0.5) * TILE_SIZE, (y + 0.5) * TILE_SIZE)
+
+    def get_cell_top_left(self, index):
+        x, y = Maze.index_to_pos(index)
+        return (x * TILE_SIZE, y * TILE_SIZE)
+
+    def get_neighbors(self, index):
+        pos = [index - COLS, index + 1, index + COLS, index - 1]
+        for i in range(len(pos)):
+            if pos[i] < 0 or pos[i] >= ROWS * COLS:
+                pos[i] = None
+        return pos
+
+    @staticmethod
+    def get_opposite_direction(direction):
+        if direction == TOP:
+            return BOTTOM
+        elif direction == RIGHT:
+            return LEFT
+        elif direction == BOTTOM:
+            return TOP
+        elif direction == LEFT:
+            return RIGHT
+        else:
+            raise ValueError("Invalid direction")
+
+    def remove_walls(self, index, direction):
+        neighbors = self.get_neighbors(index)
+        assert neighbors[direction] is not None, "No wall to remove"
+        self.cells[index].walls[direction] = False
+        self.cells[neighbors[direction]].walls[
+            self.get_opposite_direction(direction)
+        ] = False
+
+
 walls: list[Wall] = [
-    Wall((-1, -1), (WIDTH / 2, -1)),
+    Wall((-1, -1), (WIDTH, -1)),
     Wall((-1, -1), (-1, HEIGHT)),
-    Wall((WIDTH / 2, HEIGHT), (-1, HEIGHT)),
-    Wall((WIDTH / 2, HEIGHT), (WIDTH / 2, -1)),
+    Wall((WIDTH, HEIGHT), (-1, HEIGHT)),
+    Wall((WIDTH, HEIGHT), (WIDTH, -1)),
 ]
 
 for shape in shape_list:
     walls.extend(Wall.decompose_polygon(shape))
 
-player = Player((WIDTH / 4, HEIGHT / 2), 60, 200)
+maze = Maze(SCREEN_WIDTH, HEIGHT)
+start_cell, start_index = maze.get_random_cell()
+
+player = Player(maze.get_cell_center(start_index), 60, 100, 2)
 no_of_rays = 200
-max_depth = 700
-wall_size = WIDTH
+max_depth = 800
+wall_size = SCREEN_WIDTH
 
 
 def main():
@@ -204,54 +377,56 @@ def main():
         # fill the screen with a color to wipe away anything from last frame
         map.fill("black")
 
-        # RENDER YOUR GAME HERE
-        for shape in shape_list:
-            pygame.draw.polygon(map, "white", shape, 2)
-
-        for line in walls:
-            line.render(map, "grey")
+        # for shape in shape_list:
+        #     pygame.draw.polygon(map, "white", shape, 2)
+        #
+        # for line in walls:
+        #     line.render(map, "grey")
 
         player.update_position(dt)
 
-        rays, wall_positions, wall_distances = player.create_rays(walls, no_of_rays)
-        corrected_distances = []
-        wall_heights = []
-        alpha_values = []
+        # rays, wall_positions, wall_distances = player.create_rays(walls, no_of_rays)
+        # corrected_distances = []
+        # wall_heights = []
+        # alpha_values = []
 
-        for i in range(len(rays)):
-            if wall_positions[i] is not None:
-                rays[i].render(map, wall_distances[i])
-                pygame.draw.circle(map, "red", wall_positions[i], 5)
+        # for i in range(len(rays)):
+        #     if wall_positions[i] is not None:
+        #         rays[i].render(map, wall_distances[i])
+        #         pygame.draw.circle(map, "red", wall_positions[i], 5)
+        #
+        #     correct_dist = wall_distances[i] * math.cos(
+        #         (i * (player.fov / no_of_rays) - (player.fov / 2)) * (math.pi / 180)
+        #     )
+        #
+        #     wall_height = (wall_size * 15) / correct_dist
+        #
+        #     factor = pygame.math.clamp(1 - (wall_distances[i] / max_depth), 0, 1)
+        #
+        #     corrected_distances.append(correct_dist)
+        #     wall_heights.append(wall_height)
+        #     alpha_values.append(factor * 255)
+        #
 
-            correct_dist = wall_distances[i] * math.cos(
-                (i * (player.fov / no_of_rays) - (player.fov / 2)) * (math.pi / 180)
-            )
-
-            wall_height = (wall_size*15) / correct_dist
-
-            factor =  pygame.math.clamp(1 - (wall_distances[i]/ max_depth), 0, 1)
-
-
-            corrected_distances.append(correct_dist)
-            wall_heights.append(wall_height)
-            alpha_values.append(factor * 255)
-        
         player.render(map)
+        maze.render(map)
 
         # MAKEING THE PLAYER VIEW
-        render.fill("black")
-
-        box_width = (WIDTH / 2) / no_of_rays
-        for i in range(no_of_rays):
-            wall_top = (HEIGHT / 2) - (wall_heights[i] / 2)
-            pygame.draw.rect(
-                render,
-                pygame.Color(alpha_values[i],alpha_values[i],alpha_values[i]),
-                pygame.Rect(i * box_width, wall_top, box_width+1, wall_heights[i]),
-            )
+        # render.fill("black")
+        #
+        # box_width = (WIDTH / 2) / no_of_rays
+        # for i in range(no_of_rays):
+        #     wall_top = (HEIGHT / 2) - (wall_heights[i] / 2)
+        #     pygame.draw.rect(
+        #         render,
+        #         pygame.Color(alpha_values[i], alpha_values[i], alpha_values[i]),
+        #         pygame.Rect(i * box_width, wall_top, box_width + 1, wall_heights[i]),
+        #     )
 
         screen.blit(map, (0, 0))
-        screen.blit(render, (WIDTH / 2, 0))
+        screen.blit(render, (WIDTH, 0))
+
+        pygame.draw.line(screen, "white", (WIDTH, 0), (WIDTH, HEIGHT))
 
         pygame.display.update()
         dt = clock.tick(60) / 1000
