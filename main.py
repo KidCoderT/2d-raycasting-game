@@ -3,20 +3,19 @@ import random
 import sys
 
 import pygame
-from pygame.math import clamp
 
 pygame.init()
 
 # TODO: MAKE THE WIDTH AND HEIGHT BASED ON TILE_SIZE, ROW AND COL CONST
-TILE_SIZE = 40
+TILE_SIZE = 80
 SCREEN_WIDTH, HEIGHT = 1280, 720  # HCF = 80
 WIDTH = SCREEN_WIDTH // 2
 ROWS, COLS = HEIGHT // TILE_SIZE, WIDTH // TILE_SIZE
 print(ROWS, COLS)
 
-TOP = 0
+UP = 0
 RIGHT = 1
-BOTTOM = 2
+DOWN = 2
 LEFT = 3
 
 screen = pygame.display.set_mode((SCREEN_WIDTH, HEIGHT))
@@ -119,12 +118,26 @@ class Ray:
 
 
 class Player:
-    def __init__(self, pos, fov=60, speed=300, rot_speed=3):
-        self.direction = 0  # right & clockwise direction
-        self.position = pygame.Vector2(*pos)
-        self.speed = speed
+    def __init__(
+        self,
+        pos,
+        fov=60,
+        accel=400,
+        max_walk_speed=90,
+        max_sprint_speed=180,
+        friction=12,
+        rot_speed=250,
+    ):
+        self.max_walk_speed = max_walk_speed
+        self.max_sprint_speed = max_sprint_speed
         self.rot_speed = rot_speed
         self.fov = fov
+
+        self.direction = 0  # right & clockwise direction
+        self.position = pygame.Vector2(*pos)
+        self.velocity = pygame.Vector2(0, 0)
+        self.accel_speed = accel
+        self.friction = friction
 
         self.rays = []
         self.wall_distances = []
@@ -132,22 +145,59 @@ class Player:
 
     def update_position(self, dt):
         keys = pygame.key.get_pressed()
-        speed = 0
 
-        if keys[pygame.K_w] or keys[pygame.K_UP]:
-            speed = self.speed
-        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
-            speed = self.speed * -0.8
         if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-            self.direction -= self.rot_speed
+            self.direction -= self.rot_speed * dt
         if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-            self.direction += self.rot_speed
+            self.direction += self.rot_speed * dt
 
-        vector = pygame.Vector2()
-        vector.from_polar((speed, self.direction))
+        # 3. Determine if the character is moving forward or backward
+        moving_forward = keys[pygame.K_w] or keys[pygame.K_UP]
+        moving_backward = keys[pygame.K_s] or keys[pygame.K_DOWN]
+        # 4. Determine if the character is sprinting
+        sprinting = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
 
-        self.position.y += vector.y * dt
-        self.position.x += vector.x * dt
+        max_speed = self.max_walk_speed if not sprinting else self.max_sprint_speed
+
+        # 2. Smoothly ramp up/down a singular speed scalar instead of a 2D vector
+        # Extract the current length/speed from our tracking velocity
+        current_speed = self.velocity.length()
+
+        if moving_forward or moving_backward:
+            # Determine target direction modifier (1 for forward, -1 for backward)
+            direction_modifier = 1 if moving_forward else -1
+
+            # if already accelerating from less keep same check
+            if current_speed < max_speed:
+                # Accelerate towards max_speed over time
+                current_speed += self.accel_speed * dt
+                if current_speed > max_speed:
+                    current_speed = max_speed
+            elif current_speed > max_speed:
+                current_speed *= 1 - 4 * dt
+                if current_speed < max_speed:
+                    current_speed = max_speed
+
+            # CRITICAL: Force the velocity vector to point EXACTLY where we are looking!
+            # This completely eliminates the ice-skating drift.
+            self.velocity = pygame.Vector2()
+            self.velocity.from_polar(
+                (current_speed * direction_modifier, self.direction)
+            )
+
+        else:
+            # 3. Super fast slow down when no keys are pressed
+            # Using a high friction multiplier (e.g., self.friction = 10.0 or higher)
+            current_speed *= 1.0 - (self.friction * dt)
+
+            if current_speed < 1.0:
+                self.velocity = pygame.Vector2(0, 0)
+            else:
+                # Keep slowing down along the last known velocity heading
+                self.velocity = self.velocity.normalize() * current_speed
+
+        # 4. Move the character using frame-rate independent math
+        self.position += self.velocity * dt
 
     def create_rays(self, walls, n=50):
         # ray = Ray((WIDTH / 2, HEIGHT / 2), (x, y))
@@ -185,23 +235,34 @@ class Player:
     def render(self, screen: pygame.Surface):
         pygame.draw.circle(screen, "blue", self.position, 10)
 
+        ray = Ray.from_angle(player.position.xy, player.direction)
+        ray.render(screen, 50, "red")
+
 
 class Cell:
     def __init__(self, x, y):
-        self.x = x
-        self.y = y
+        self.i = x
+        self.j = y
         self.index = y * COLS + x
         self.walls = [True, True, True, True]  # TOP, RIGHT, BOTTOM, LEFT
 
         self.visited = False
 
+    def reset(self):
+        self.visited = False
+        self.walls = [True, True, True, True]
+
+    @property
+    def ij(self):
+        return self.i, self.j
+
     @property
     def cell_center(self):
-        return ((self.x + 0.5) * TILE_SIZE, (self.y + 0.5) * TILE_SIZE)
+        return ((self.i + 0.5) * TILE_SIZE, (self.j + 0.5) * TILE_SIZE)
 
     @property
     def cell_top_left(self):
-        return ((self.x) * TILE_SIZE, (self.y) * TILE_SIZE)
+        return ((self.i) * TILE_SIZE, (self.j) * TILE_SIZE)
 
     def render(
         self,
@@ -213,32 +274,32 @@ class Cell:
         DEBUG=False,
     ):
         points = []
-        if self.walls[TOP]:
+        if self.walls[UP]:
             points.append(
                 (
-                    (self.x * TILE_SIZE, self.y * TILE_SIZE),
-                    ((self.x + 1) * TILE_SIZE, self.y * TILE_SIZE),
+                    (self.i * TILE_SIZE, self.j * TILE_SIZE),
+                    ((self.i + 1) * TILE_SIZE, self.j * TILE_SIZE),
                 )
             )
         if self.walls[RIGHT]:
             points.append(
                 (
-                    ((self.x + 1) * TILE_SIZE, self.y * TILE_SIZE),
-                    ((self.x + 1) * TILE_SIZE, (self.y + 1) * TILE_SIZE),
+                    ((self.i + 1) * TILE_SIZE, self.j * TILE_SIZE),
+                    ((self.i + 1) * TILE_SIZE, (self.j + 1) * TILE_SIZE),
                 )
             )
-        if self.walls[BOTTOM]:
+        if self.walls[DOWN]:
             points.append(
                 (
-                    (self.x * TILE_SIZE, (self.y + 1) * TILE_SIZE),
-                    ((self.x + 1) * TILE_SIZE, (self.y + 1) * TILE_SIZE),
+                    (self.i * TILE_SIZE, (self.j + 1) * TILE_SIZE),
+                    ((self.i + 1) * TILE_SIZE, (self.j + 1) * TILE_SIZE),
                 )
             )
         if self.walls[LEFT]:
             points.append(
                 (
-                    (((self.x) * TILE_SIZE), self.y * TILE_SIZE),
-                    (((self.x) * TILE_SIZE), (self.y + 1) * TILE_SIZE),
+                    (((self.i) * TILE_SIZE), self.j * TILE_SIZE),
+                    (((self.i) * TILE_SIZE), (self.j + 1) * TILE_SIZE),
                 )
             )
 
@@ -246,30 +307,32 @@ class Cell:
             pygame.draw.rect(
                 screen,
                 fill_color,
-                (self.x * TILE_SIZE, self.y * TILE_SIZE, TILE_SIZE, TILE_SIZE),
+                (self.i * TILE_SIZE, self.j * TILE_SIZE, TILE_SIZE, TILE_SIZE),
             )
 
         for point in points:
             pygame.draw.line(screen, line_color, point[0], point[1], width)
 
         if DEBUG:
-            text_surface = my_font.render(str(self.index), True, "white")
+            text_surface = my_font.render(
+                f"{self.index}\n{self.i},{self.j}", True, "white"
+            )
             text_rect = text_surface.get_rect()
-            text_rect.center = ((self.x + 0.5) * TILE_SIZE, (self.y + 0.5) * TILE_SIZE)
+            text_rect.center = ((self.i + 0.5) * TILE_SIZE, (self.j + 0.5) * TILE_SIZE)
 
             screen.blit(text_surface, text_rect)
 
 
 class Maze:
     @staticmethod
-    def index_to_pos(index):
-        x = index % COLS
-        y = index // COLS
-        return x, y
+    def index_to_ij(index):
+        i = index % COLS
+        j = index // COLS
+        return i, j
 
     @staticmethod
-    def pos_to_index(x, y):
-        return y * COLS + x
+    def pos_to_index(i, j):
+        return j * COLS + i
 
     def __init__(self, width, height):
         self.cells: list[Cell] = []
@@ -277,9 +340,13 @@ class Maze:
         #     for j in range(COLS):
         #         self.cells.append(Cell(i, j))
         for index in range(ROWS * COLS):
-            cell = Cell(*Maze.index_to_pos(index))
+            cell = Cell(*Maze.index_to_ij(index))
             assert cell.index == index
             self.cells.append(cell)
+
+    def reset_maze(self):
+        for cell in self.cells:
+            cell.reset()
 
     def render(self, screen: pygame.Surface):
         for cell in self.cells:
@@ -306,40 +373,238 @@ class Maze:
         return self.cells[index], index
 
     def get_cell_center(self, index):
-        x, y = Maze.index_to_pos(index)
-        return ((x + 0.5) * TILE_SIZE, (y + 0.5) * TILE_SIZE)
+        i, j = Maze.index_to_ij(index)
+        return ((i + 0.5) * TILE_SIZE, (j + 0.5) * TILE_SIZE)
 
     def get_cell_top_left(self, index):
-        x, y = Maze.index_to_pos(index)
-        return (x * TILE_SIZE, y * TILE_SIZE)
+        i, j = Maze.index_to_ij(index)
+        return (i * TILE_SIZE, j * TILE_SIZE)
 
-    def get_neighbors(self, index):
+    def get_neighbors_indices(self, index):
+        o_i, o_j = Maze.index_to_ij(index)
         pos = [index - COLS, index + 1, index + COLS, index - 1]
-        for i in range(len(pos)):
-            if pos[i] < 0 or pos[i] >= ROWS * COLS:
-                pos[i] = None
+        for idx in range(len(pos)):
+            if pos[idx] < 0 or pos[idx] >= ROWS * COLS:
+                pos[idx] = None
+                continue
+
+            n_i, n_j = Maze.index_to_ij(pos[idx])
+
+            if n_i < 0 or n_i > ROWS or n_j < 0 or n_j > COLS:
+                pos[idx] = None
+                continue
+
+            if abs(n_i - o_i) > 1 or abs(n_j - o_j) > 1:
+                pos[idx] = None
+                continue
+
         return pos
 
     @staticmethod
     def get_opposite_direction(direction):
-        if direction == TOP:
-            return BOTTOM
+        if direction == UP:
+            return DOWN
         elif direction == RIGHT:
             return LEFT
-        elif direction == BOTTOM:
-            return TOP
+        elif direction == DOWN:
+            return UP
         elif direction == LEFT:
             return RIGHT
         else:
             raise ValueError("Invalid direction")
 
     def remove_walls(self, index, direction):
-        neighbors = self.get_neighbors(index)
+        neighbors = self.get_neighbors_indices(index)
         assert neighbors[direction] is not None, "No wall to remove"
         self.cells[index].walls[direction] = False
         self.cells[neighbors[direction]].walls[
             self.get_opposite_direction(direction)
         ] = False
+
+    def remove_walls_between(self, index, neighbor, raise_error=True):
+        og_i, og_j = self.cells[index].ij
+        new_i, new_j = self.cells[neighbor].ij
+
+        if new_i - og_i == 1 and new_j - og_j == 0:
+            self.remove_walls(index, RIGHT)
+        elif new_i - og_i == -1 and new_j - og_j == 0:
+            self.remove_walls(index, LEFT)
+        elif new_i - og_i == 0 and new_j - og_j == 1:
+            self.remove_walls(index, DOWN)
+        elif new_i - og_i == 0 and new_j - og_j == -1:
+            self.remove_walls(index, UP)
+        elif raise_error:
+            raise ValueError("Invalid direction")
+
+    def setup_maze(self, start_index=None):
+        # self.dfs(start_index)  #
+        # self.bfs(start_index)
+        # self.hunt_and_kill(start_index)
+        self.prims(start_index)
+
+    def dfs(self, start_index=None):
+        self.reset_maze()
+
+        if start_index is None:
+            _, start_index = self.get_random_cell()
+
+        self.cells[start_index].visited = True
+        stack = [start_index]
+
+        while stack:
+            current_index = stack[-1]  # get the last element
+
+            neighbors = [
+                index
+                for index in self.get_neighbors_indices(current_index)
+                if index is not None and self.cells[index].visited is False
+            ]
+
+            if len(neighbors) == 0:
+                stack.pop()  # remove the last element we reached an end
+                continue
+
+            next_index = random.choice(neighbors)
+
+            self.remove_walls_between(current_index, next_index)
+            self.cells[next_index].visited = True
+            stack.append(next_index)
+
+        # done!
+
+    def bfs(self, start_index=None):
+        self.reset_maze()
+
+        if start_index is None:
+            _, start_index = self.get_random_cell()
+
+        self.cells[start_index].visited = True
+
+        queue = []
+        queue.extend(
+            [idx for idx in self.get_neighbors_indices(start_index) if idx is not None]
+        )
+
+        while queue:
+            current_index = random.choice(queue)  # get the first element
+            queue.remove(current_index)
+
+            if self.cells[current_index].visited:  # others already visited
+                continue
+
+            # we find the visited neighbors to connect back to
+            visited_neighbors = [
+                index
+                for index in self.get_neighbors_indices(current_index)
+                if index is not None and self.cells[index].visited
+            ]
+
+            if visited_neighbors:
+                target_neighbor = random.choice(visited_neighbors)
+                self.remove_walls_between(current_index, target_neighbor)
+
+            # mark myself as visited
+            self.cells[current_index].visited = True
+
+            # add the unvisited neighbors to the queue
+            queue.extend(
+                [
+                    idx
+                    for idx in self.get_neighbors_indices(current_index)
+                    if idx is not None and self.cells[idx].visited is False
+                ]
+            )
+
+        # done!
+
+    def hunt_and_kill(self, start_index=None):
+        self.reset_maze()
+
+        if start_index is None:
+            _, start_index = self.get_random_cell()
+
+        self.cells[start_index].visited = True
+
+        current_index = start_index
+        highest_indices = 0
+
+        unvisited_count = (ROWS * COLS) - 1
+        while unvisited_count > 0:
+            neighbors = [
+                idx
+                for idx in self.get_neighbors_indices(current_index)
+                if idx is not None and self.cells[idx].visited is False
+            ]
+
+            if neighbors:
+                # KILL
+                next_index = random.choice(neighbors)
+                self.remove_walls_between(current_index, next_index)
+                current_index = next_index
+                self.cells[current_index].visited = True
+                unvisited_count -= 1
+            else:
+                # HUNT
+                found_new_start = False
+
+                for idx in range(highest_indices, ROWS * COLS):
+                    highest_indices = idx
+                    if self.cells[idx].visited:
+                        continue
+
+                    neighbors = [
+                        idx
+                        for idx in self.get_neighbors_indices(idx)
+                        if idx is not None and self.cells[idx].visited == True
+                    ]
+                    if len(neighbors) == 0:
+                        continue
+
+                    prev = random.choice(neighbors)
+                    self.remove_walls_between(prev, idx)
+                    current_index = idx
+                    self.cells[current_index].visited = True
+                    unvisited_count -= 1
+                    found_new_start = True
+                    break
+
+                if not found_new_start:
+                    break
+
+    def prims(self, start_index=None):
+        self.reset_maze()
+
+        if start_index is None:
+            _, start_index = self.get_random_cell()
+
+        self.cells[start_index].visited = True
+
+        walls_list = [
+            (start_index, idx)
+            for idx in self.get_neighbors_indices(start_index)
+            if idx is not None and self.cells[idx] is not None
+        ]
+
+        # remaining_loops = (ROWS * COLS) - 1
+        while walls_list:
+            rand_idx = random.randrange(len(walls_list))
+            joint = walls_list.pop(rand_idx)
+            start, new = joint
+            if self.cells[new].visited:
+                continue
+
+            self.remove_walls_between(*joint)
+            self.cells[new].visited = True
+
+            walls_list.extend(
+                [
+                    (new, idx)
+                    for idx in self.get_neighbors_indices(new)
+                    if idx is not None
+                    and self.cells[idx] is not None
+                    and self.cells[idx].visited is False
+                ]
+            )
 
 
 walls: list[Wall] = [
@@ -355,10 +620,12 @@ for shape in shape_list:
 maze = Maze(SCREEN_WIDTH, HEIGHT)
 start_cell, start_index = maze.get_random_cell()
 
-player = Player(maze.get_cell_center(start_index), 60, 100, 2)
+player = Player(maze.get_cell_center(start_index), 60)
 no_of_rays = 200
 max_depth = 800
 wall_size = SCREEN_WIDTH
+
+maze.setup_maze(start_index)
 
 
 def main():
