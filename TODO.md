@@ -2,7 +2,7 @@
 
 ## Phase 1: Procedural Expansions & State Loops
 - [x] **Implement Prim's Algorithm:** Write the minimum spanning tree generator alongside your DFS, BFS, and Hunt-and-Kill routines
-- [ ] **Keyboard Input Router:** Map keys `1`, `2`, `3`, `4` to instantly reset the board state, wipe the player position, and trigger the selected algorithm
+- [x] **Keyboard Input Router:** Map keys `1`, `2`, `3`, `4` to instantly reset the board state, wipe the player position, and trigger the selected algorithm
 - [ ] **The Loading Screen Hook:** Keep the current 2D edge-carving animation running visually on screen as a structural schematic before compiling the map
 
 ## Phase 2: The Cell-to-Block Grid Compiler
