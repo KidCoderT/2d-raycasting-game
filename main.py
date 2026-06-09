@@ -21,12 +21,12 @@ print(HCF)
 
 # 640, 720 -> 320, 360 -> 160, 180 -> 80, 90 -> 40, 45
 
-TILE_OPTIONS = [90, 72, 36, 18, 9, 3]
-TILE_INDEX = 3
+MAZE_TILE_OPTIONS = [90, 72, 36, 18, 9, 3]
+MAZE_TILE_INDEX = 2
 
-TILE_SIZE = TILE_OPTIONS[TILE_INDEX]
-ROWS, COLS = HEIGHT // TILE_SIZE, WIDTH // TILE_SIZE
-SCALE = TILE_SIZE / HCF
+MAZE_TILE_SIZE = MAZE_TILE_OPTIONS[MAZE_TILE_INDEX]
+MAZE_ROWS, MAZE_COLS = HEIGHT // MAZE_TILE_SIZE, WIDTH // MAZE_TILE_SIZE
+SCALE = MAZE_TILE_SIZE / HCF
 
 UP = 0
 RIGHT = 1
@@ -148,35 +148,39 @@ class Player:
         max_sprint_speed=DEFAULT_MAX_SPRINT_SPEED * SCALE,
         friction=DEFAULT_FRICTION,
         rot_speed=DEFAULT_ROT_SPEED,
+        extra_scaling=1,
     ):
-        self.max_walk_speed = max_walk_speed
-        self.max_sprint_speed = max_sprint_speed
+        self.max_walk_speed = max_walk_speed * extra_scaling
+        self.max_sprint_speed = max_sprint_speed * extra_scaling
         self.rot_speed = rot_speed
         self.fov = fov
 
         self.direction = 0  # right & clockwise direction
         self.position = pygame.Vector2(*pos)
         self.velocity = pygame.Vector2(0, 0)
-        self.accel_speed = accel
+        self.accel_speed = accel * extra_scaling
         self.friction = friction
 
         self.rays = []
         self.wall_distances = []
         self.wall_positions = []
+        self.extra_scaling = extra_scaling
 
     def tiles_reset(self):
         # UNNESSERAY BUT FOR TEST CASE SO...
         old_max = self.max_walk_speed if self.max_walk_speed > 0 else 1.0
 
         # UPDATE THESE
-        self.accel_speed = self.DEFAULT_ACCEL * SCALE
-        self.max_walk_speed = self.DEFAULT_MAX_SPEED * SCALE
-        self.max_sprint_speed = self.DEFAULT_MAX_SPRINT_SPEED * SCALE
+        self.accel_speed = self.DEFAULT_ACCEL * SCALE * self.extra_scaling
+        self.max_walk_speed = self.DEFAULT_MAX_SPEED * SCALE * self.extra_scaling
+        self.max_sprint_speed = (
+            self.DEFAULT_MAX_SPRINT_SPEED * SCALE * self.extra_scaling
+        )
         # self.rot_speed = self.DEFAULT_ROT_SPEED
 
         # INCASE PLAYER MOVES WHILE WE ARE CHANING
         scale_ratio = self.max_walk_speed / old_max
-        self.velocity *= scale_ratio
+        self.velocity *= scale_ratio * self.extra_scaling
 
     def update_position(self, dt):
         keys = pygame.key.get_pressed()
@@ -274,11 +278,11 @@ class Player:
         ray.render(screen, 50 * SCALE, "red")
 
 
-class Cell:
+class MazeCell:
     def __init__(self, x, y):
         self.i = x
         self.j = y
-        self.index = y * COLS + x
+        self.index = y * MAZE_COLS + x
         self.walls = [True, True, True, True]  # TOP, RIGHT, BOTTOM, LEFT
 
         self.visited = False
@@ -293,11 +297,11 @@ class Cell:
 
     @property
     def cell_center(self):
-        return ((self.i + 0.5) * TILE_SIZE, (self.j + 0.5) * TILE_SIZE)
+        return ((self.i + 0.5) * MAZE_TILE_SIZE, (self.j + 0.5) * MAZE_TILE_SIZE)
 
     @property
     def cell_top_left(self):
-        return ((self.i) * TILE_SIZE, (self.j) * TILE_SIZE)
+        return ((self.i) * MAZE_TILE_SIZE, (self.j) * MAZE_TILE_SIZE)
 
     def render(
         self,
@@ -312,29 +316,29 @@ class Cell:
         if self.walls[UP]:
             points.append(
                 (
-                    (self.i * TILE_SIZE, self.j * TILE_SIZE),
-                    ((self.i + 1) * TILE_SIZE, self.j * TILE_SIZE),
+                    (self.i * MAZE_TILE_SIZE, self.j * MAZE_TILE_SIZE),
+                    ((self.i + 1) * MAZE_TILE_SIZE, self.j * MAZE_TILE_SIZE),
                 )
             )
         if self.walls[RIGHT]:
             points.append(
                 (
-                    ((self.i + 1) * TILE_SIZE, self.j * TILE_SIZE),
-                    ((self.i + 1) * TILE_SIZE, (self.j + 1) * TILE_SIZE),
+                    ((self.i + 1) * MAZE_TILE_SIZE, self.j * MAZE_TILE_SIZE),
+                    ((self.i + 1) * MAZE_TILE_SIZE, (self.j + 1) * MAZE_TILE_SIZE),
                 )
             )
         if self.walls[DOWN]:
             points.append(
                 (
-                    (self.i * TILE_SIZE, (self.j + 1) * TILE_SIZE),
-                    ((self.i + 1) * TILE_SIZE, (self.j + 1) * TILE_SIZE),
+                    (self.i * MAZE_TILE_SIZE, (self.j + 1) * MAZE_TILE_SIZE),
+                    ((self.i + 1) * MAZE_TILE_SIZE, (self.j + 1) * MAZE_TILE_SIZE),
                 )
             )
         if self.walls[LEFT]:
             points.append(
                 (
-                    (((self.i) * TILE_SIZE), self.j * TILE_SIZE),
-                    (((self.i) * TILE_SIZE), (self.j + 1) * TILE_SIZE),
+                    (((self.i) * MAZE_TILE_SIZE), self.j * MAZE_TILE_SIZE),
+                    (((self.i) * MAZE_TILE_SIZE), (self.j + 1) * MAZE_TILE_SIZE),
                 )
             )
 
@@ -342,7 +346,12 @@ class Cell:
             pygame.draw.rect(
                 screen,
                 fill_color,
-                (self.i * TILE_SIZE, self.j * TILE_SIZE, TILE_SIZE, TILE_SIZE),
+                (
+                    self.i * MAZE_TILE_SIZE,
+                    self.j * MAZE_TILE_SIZE,
+                    MAZE_TILE_SIZE,
+                    MAZE_TILE_SIZE,
+                ),
             )
 
         for point in points:
@@ -353,12 +362,15 @@ class Cell:
                 f"{self.index}\n{self.i},{self.j}", True, "white"
             )
             text_rect = text_surface.get_rect()
-            text_rect.center = ((self.i + 0.5) * TILE_SIZE, (self.j + 0.5) * TILE_SIZE)
+            text_rect.center = (
+                (self.i + 0.5) * MAZE_TILE_SIZE,
+                (self.j + 0.5) * MAZE_TILE_SIZE,
+            )
 
             screen.blit(text_surface, text_rect)
 
 
-class Maze:
+class MazeGenerator:
     MAZE_TYPES = [
         "DFS",
         "BFS",
@@ -368,16 +380,16 @@ class Maze:
 
     @staticmethod
     def index_to_ij(index):
-        i = index % COLS
-        j = index // COLS
+        i = index % MAZE_COLS
+        j = index // MAZE_COLS
         return i, j
 
     @staticmethod
     def pos_to_index(i, j):
-        return j * COLS + i
+        return j * MAZE_COLS + i
 
     def __init__(self):
-        self.cells: list[Cell] = []
+        self.cells: list[MazeCell] = []
         self.reset_tiles()
 
     def reset_maze(self):
@@ -385,9 +397,9 @@ class Maze:
             cell.reset()
 
     def reset_tiles(self):
-        self.cells: list[Cell] = []
-        for index in range(ROWS * COLS):
-            cell = Cell(*Maze.index_to_ij(index))
+        self.cells: list[MazeCell] = []
+        for index in range(MAZE_ROWS * MAZE_COLS):
+            cell = MazeCell(*MazeGenerator.index_to_ij(index))
             assert cell.index == index
             self.cells.append(cell)
 
@@ -416,24 +428,24 @@ class Maze:
         return self.cells[index], index
 
     def get_cell_center(self, index):
-        i, j = Maze.index_to_ij(index)
-        return ((i + 0.5) * TILE_SIZE, (j + 0.5) * TILE_SIZE)
+        i, j = MazeGenerator.index_to_ij(index)
+        return ((i + 0.5) * MAZE_TILE_SIZE, (j + 0.5) * MAZE_TILE_SIZE)
 
     def get_cell_top_left(self, index):
-        i, j = Maze.index_to_ij(index)
-        return (i * TILE_SIZE, j * TILE_SIZE)
+        i, j = MazeGenerator.index_to_ij(index)
+        return (i * MAZE_TILE_SIZE, j * MAZE_TILE_SIZE)
 
     def get_neighbors_indices(self, index):
-        o_i, o_j = Maze.index_to_ij(index)
-        pos = [index - COLS, index + 1, index + COLS, index - 1]
+        o_i, o_j = MazeGenerator.index_to_ij(index)
+        pos = [index - MAZE_COLS, index + 1, index + MAZE_COLS, index - 1]
         for idx in range(len(pos)):
-            if pos[idx] < 0 or pos[idx] >= ROWS * COLS:
+            if pos[idx] < 0 or pos[idx] >= MAZE_ROWS * MAZE_COLS:
                 pos[idx] = None
                 continue
 
-            n_i, n_j = Maze.index_to_ij(pos[idx])
+            n_i, n_j = MazeGenerator.index_to_ij(pos[idx])
 
-            if n_i < 0 or n_i >= COLS or n_j < 0 or n_j >= ROWS:
+            if n_i < 0 or n_i >= MAZE_COLS or n_j < 0 or n_j >= MAZE_ROWS:
                 pos[idx] = None
                 continue
 
@@ -577,7 +589,7 @@ class Maze:
         current_index = start_index
         highest_indices = 0
 
-        unvisited_count = (ROWS * COLS) - 1
+        unvisited_count = (MAZE_ROWS * MAZE_COLS) - 1
         while unvisited_count > 0:
             neighbors = [
                 idx
@@ -596,7 +608,7 @@ class Maze:
                 # HUNT
                 found_new_start = False
 
-                for idx in range(highest_indices, ROWS * COLS):
+                for idx in range(highest_indices, MAZE_ROWS * MAZE_COLS):
                     if self.cells[idx].visited:
                         if idx == highest_indices:
                             highest_indices += 1
@@ -657,10 +669,138 @@ class Maze:
             )
 
 
+class GridCells:
+    CELL_TYPES = {
+        "WALL": 1,
+        "SPACE": 0,
+    }
+
+    def __init__(self, i, j, grid: Grid, type=0):
+        self.i = i
+        self.j = j
+        self.type = type
+        self.index = grid.cols * j + i
+        self.grid = grid
+
+        assert self.type in self.CELL_TYPES.values()
+
+    def reset(self):
+        self.type = 0
+
+    def convert_type(self, type):
+        if type in self.CELL_TYPES.keys():
+            self.type = self.CELL_TYPES[type]
+        else:
+            raise ValueError("Invalid type")
+
+    def render(self, screen: pygame.Surface, DEBUG=False):
+        pygame.draw.rect(
+            screen,
+            "black" if self.type == 0 else "grey",
+            (
+                self.i * self.grid.tile_size,
+                self.j * self.grid.tile_size,
+                self.grid.tile_size,
+                self.grid.tile_size,
+            ),
+        )
+        if DEBUG:
+            text_surface = my_font.render(
+                f"{self.index}\n{self.i},{self.j}", True, "white"
+            )
+            text_rect = text_surface.get_rect()
+            text_rect.center = (
+                (self.i + 0.5) * self.grid.tile_size,
+                (self.j + 0.5) * self.grid.tile_size,
+            )
+
+            screen.blit(text_surface, text_rect)
+
+
+class Grid:
+    def __init__(self):
+        self.cells: list[GridCells] = []
+        self.reset_tiles()
+
+    def index_to_ij(self, index):
+        i = index % self.cols
+        j = index // self.cols
+        return i, j
+
+    def pos_to_index(self, i, j):
+        return j * self.cols + i
+
+    def reset_tiles(self):
+        self.cells: list[GridCells] = []
+        self.rows = MAZE_ROWS * 3
+        self.cols = MAZE_COLS * 3
+        self.tile_size = MAZE_TILE_SIZE / 3
+
+        for i in range(self.rows * self.cols):
+            self.cells.append(
+                GridCells(
+                    i % self.cols,
+                    i // self.cols,
+                    self,
+                )
+            )
+
+    def setup_maze(self, maze: MazeGenerator):
+        for cell in self.cells:
+            self.cells[cell.index].reset()
+
+        for idx, maze_cell in enumerate(maze.cells):
+            maze_i, maze_j = maze_cell.ij
+            scalled_i = maze_i * 3
+            scalled_j = maze_j * 3
+
+            to_be_walled = []
+
+            # Make all corners wall
+            to_be_walled.append(self.pos_to_index(scalled_i, scalled_j))
+            to_be_walled.append(self.pos_to_index(scalled_i + 2, scalled_j))
+            to_be_walled.append(self.pos_to_index(scalled_i + 2, scalled_j + 2))
+            to_be_walled.append(self.pos_to_index(scalled_i, scalled_j + 2))
+
+            if maze_cell.walls[UP]:
+                to_be_walled.append(self.pos_to_index(scalled_i + 1, scalled_j))
+            if maze_cell.walls[RIGHT]:
+                to_be_walled.append(self.pos_to_index(scalled_i + 2, scalled_j + 1))
+            if maze_cell.walls[DOWN]:
+                to_be_walled.append(self.pos_to_index(scalled_i + 1, scalled_j + 2))
+            if maze_cell.walls[LEFT]:
+                to_be_walled.append(self.pos_to_index(scalled_i, scalled_j + 1))
+
+            for index in to_be_walled:
+                self.cells[index].convert_type("WALL")
+
+    def render(self, screen: pygame.Surface, DEBUG=False):
+        for cell in self.cells:
+            cell.render(screen, DEBUG=DEBUG)
+
+    def maze_to_grid_idx(self, maze_idx, center_cell=False):
+        maze_i, maze_j = MazeGenerator.index_to_ij(maze_idx)
+
+        if center_cell:
+            return self.pos_to_index(maze_i * 3 + 1, maze_j * 3 + 1)
+
+        return self.pos_to_index(maze_i * 3, maze_j * 3)
+
+    def get_cell_center(self, index):
+        i, j = self.index_to_ij(index)
+        return pygame.Vector2((i + 0.5) * self.tile_size, (j + 0.5) * self.tile_size)
+
+    def get_random_cell(self):
+        index = random.randint(0, len(self.cells) - 1)
+        return self.cells[index], index
+
+
 class Game:
     def __init__(self):
-        self.maze = Maze()
-        self.player = Player((0, 0))
+        self.maze = MazeGenerator()
+        self.player1 = Player((0, 0))
+        self.player2 = Player((0, 0), extra_scaling=3)
+        self.grid = Grid()
         # self.walls = maze.get_walls()
         self.wall_size = SCREEN_WIDTH
         self.no_of_rays = 200
@@ -670,15 +810,26 @@ class Game:
 
         self.set_game()
 
+    def reset_game_tiles(self):
+        self.maze.reset_tiles()
+        self.grid.reset_tiles()
+        self.player1.tiles_reset()
+        self.player2.tiles_reset()
+
     def set_game(self, new_maze_type=None):
         if new_maze_type is not None:
             self.maze_type = new_maze_type
+        # TODO: MAKE IT POINT IN OPEN SPACE
 
         _, start_index = self.maze.get_random_cell()
-        # TODO: MAKE IT POINT IN OPEN SPACE
-        self.player.position = self.maze.get_cell_center(start_index)
-        self.player.direction = 0
+        self.player1.position = self.maze.get_cell_center(start_index)
+        self.player1.direction = 0
         self.maze.setup_maze(start_index, self.maze_type)
+        self.grid.setup_maze(self.maze)
+
+        grid_start_index = self.grid.maze_to_grid_idx(start_index, True)
+        self.player2.position = self.grid.get_cell_center(grid_start_index)
+        self.player2.direction = 0
 
     def update_and_render(self, map, render, dt):
         # fill the screen with a color to wipe away anything from last frame
@@ -690,7 +841,8 @@ class Game:
         # for line in walls:
         #     line.render(map, "grey")
 
-        self.player.update_position(dt)
+        self.player1.update_position(dt)
+        self.player2.update_position(dt)
 
         # rays, wall_positions, wall_distances = player.create_rays(walls, no_of_rays)
         # corrected_distances = []
@@ -715,8 +867,11 @@ class Game:
         #     alpha_values.append(factor * 255)
         #
 
-        self.player.render(map)
         self.maze.render(map)
+        self.player1.render(map)
+
+        self.grid.render(render)
+        self.player2.render(render)
 
         # MAKEING THE PLAYER VIEW
         # render.fill("black")
@@ -751,6 +906,13 @@ game = Game()
 
 
 def main():
+    global \
+        MAZE_TILE_INDEX, \
+        MAZE_TILE_SIZE, \
+        MAZE_ROWS, \
+        MAZE_COLS, \
+        SCALE, \
+        MAZE_TILE_OPTIONS
     running = True
     dt = 0
 
@@ -764,34 +926,41 @@ def main():
                 running = False
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_1:
-                    game.set_game(Maze.MAZE_TYPES[0])
+                    game.set_game(MazeGenerator.MAZE_TYPES[0])
                 elif event.key == pygame.K_2:
-                    game.set_game(Maze.MAZE_TYPES[1])
+                    game.set_game(MazeGenerator.MAZE_TYPES[1])
                 elif event.key == pygame.K_3:
-                    game.set_game(Maze.MAZE_TYPES[2])
+                    game.set_game(MazeGenerator.MAZE_TYPES[2])
                 elif event.key == pygame.K_4:
-                    game.set_game(Maze.MAZE_TYPES[3])
+                    game.set_game(MazeGenerator.MAZE_TYPES[3])
 
-                if event.key == pygame.K_EQUALS and TILE_INDEX < len(TILE_OPTIONS) - 1:
-                    TILE_INDEX += 1
-                    TILE_SIZE = TILE_OPTIONS[TILE_INDEX]
+                if (
+                    event.key == pygame.K_EQUALS
+                    and MAZE_TILE_INDEX < len(MAZE_TILE_OPTIONS) - 1
+                ):
+                    MAZE_TILE_INDEX += 1
+                    MAZE_TILE_SIZE = MAZE_TILE_OPTIONS[MAZE_TILE_INDEX]
                     # TILE_SIZE = TILE_SIZE * 2
 
-                    ROWS, COLS = HEIGHT // TILE_SIZE, WIDTH // TILE_SIZE
-                    SCALE = TILE_SIZE / HCF
-                    game.maze.reset_tiles()
-                    game.player.tiles_reset()
+                    MAZE_ROWS, MAZE_COLS = (
+                        HEIGHT // MAZE_TILE_SIZE,
+                        WIDTH // MAZE_TILE_SIZE,
+                    )
+                    SCALE = MAZE_TILE_SIZE / HCF
+                    game.reset_game_tiles()
                     game.set_game()
 
-                if event.key == pygame.K_MINUS and TILE_INDEX > 0:
-                    TILE_INDEX -= 1
-                    TILE_SIZE = TILE_OPTIONS[TILE_INDEX]
+                if event.key == pygame.K_MINUS and MAZE_TILE_INDEX > 0:
+                    MAZE_TILE_INDEX -= 1
+                    MAZE_TILE_SIZE = MAZE_TILE_OPTIONS[MAZE_TILE_INDEX]
                     # TILE_SIZE = TILE_SIZE // 2
 
-                    ROWS, COLS = HEIGHT // TILE_SIZE, WIDTH // TILE_SIZE
-                    SCALE = TILE_SIZE / HCF
-                    game.maze.reset_tiles()
-                    game.player.tiles_reset()
+                    MAZE_ROWS, MAZE_COLS = (
+                        HEIGHT // MAZE_TILE_SIZE,
+                        WIDTH // MAZE_TILE_SIZE,
+                    )
+                    SCALE = MAZE_TILE_SIZE / HCF
+                    game.reset_game_tiles()
                     game.set_game()
 
         game.update_and_render(map, render, dt)
