@@ -13,6 +13,8 @@ def get_hcf(a, b):
     return a
 
 
+# DEBUG_CIRC = (0, 0)
+
 # TODO: MAKE THE WIDTH AND HEIGHT BASED ON TILE_SIZE, ROW AND COL CONST
 SCREEN_WIDTH, HEIGHT = 1440, 720  # HCF = 80
 WIDTH = SCREEN_WIDTH // 2
@@ -20,9 +22,8 @@ HCF = 72
 print(HCF)
 
 # 640, 720 -> 320, 360 -> 160, 180 -> 80, 90 -> 40, 45
-
-TILE_OPTIONS = [90, 72, 36, 18, 9, 3]
-TILE_INDEX = 3
+TILE_OPTIONS = [90, 72, 36, 24, 18, 9, 3]
+TILE_INDEX = 2
 
 TILE_SIZE = TILE_OPTIONS[TILE_INDEX]
 ROWS, COLS = HEIGHT // TILE_SIZE, WIDTH // TILE_SIZE
@@ -138,6 +139,7 @@ class Player:
     DEFAULT_MAX_SPRINT_SPEED = 180
     DEFAULT_FRICTION = 12
     DEFAULT_ROT_SPEED = 250
+    PLAYER_RADIUS = 10
 
     def __init__(
         self,
@@ -148,10 +150,12 @@ class Player:
         max_sprint_speed=DEFAULT_MAX_SPRINT_SPEED * SCALE,
         friction=DEFAULT_FRICTION,
         rot_speed=DEFAULT_ROT_SPEED,
+        radius=PLAYER_RADIUS * SCALE,
     ):
         self.max_walk_speed = max_walk_speed
         self.max_sprint_speed = max_sprint_speed
         self.rot_speed = rot_speed
+        self.radius = radius
         self.fov = fov
 
         self.direction = 0  # right & clockwise direction
@@ -172,13 +176,15 @@ class Player:
         self.accel_speed = self.DEFAULT_ACCEL * SCALE
         self.max_walk_speed = self.DEFAULT_MAX_SPEED * SCALE
         self.max_sprint_speed = self.DEFAULT_MAX_SPRINT_SPEED * SCALE
+        self.radius = self.PLAYER_RADIUS * SCALE
         # self.rot_speed = self.DEFAULT_ROT_SPEED
 
         # INCASE PLAYER MOVES WHILE WE ARE CHANING
         scale_ratio = self.max_walk_speed / old_max
         self.velocity *= scale_ratio
 
-    def update_position(self, dt):
+    def update_position(self, dt, maze: Maze):
+        # global DEBUG_CIRC
         keys = pygame.key.get_pressed()
 
         if keys[pygame.K_a] or keys[pygame.K_LEFT]:
@@ -231,8 +237,120 @@ class Player:
                 # Keep slowing down along the last known velocity heading
                 self.velocity = self.velocity.normalize() * current_speed
 
+        # Collision detection
+
+        moving = [False, False, False, False]  # TOP, RIGHT, BOTTOM, LEFT
+        if self.velocity.x > 0:
+            moving[RIGHT] = True
+        if self.velocity.x < 0:
+            moving[LEFT] = True
+        if self.velocity.y > 0:
+            moving[UP] = True
+        if self.velocity.y < 0:
+            moving[DOWN] = True
+
+        crossing_boundary = [False, False, False, False]  # TOP, RIGHT, BOTTOM, LEFT
+        i, j = self.position.x // TILE_SIZE, self.position.y // TILE_SIZE
+
+        if abs(j * TILE_SIZE - self.position.y) <= self.radius + 2:
+            crossing_boundary[UP] = True
+        if abs((j + 1) * TILE_SIZE - self.position.y) <= self.radius + 2:
+            crossing_boundary[DOWN] = True
+        if abs(i * TILE_SIZE - self.position.x) <= self.radius + 2:
+            crossing_boundary[LEFT] = True
+        if abs((i + 1) * TILE_SIZE - self.position.x) <= self.radius + 2:
+            crossing_boundary[RIGHT] = True
+
+        cell_neighbors = maze.get_neighbors_indices(maze.pos_to_index(i, j))
+
+        if (
+            crossing_boundary[UP]
+            and self.velocity.y < 0
+            and cell_neighbors[UP] is not None
+            and maze.cells[cell_neighbors[UP]].walls[DOWN]
+        ):
+            self.velocity.y = 0
+        if (
+            crossing_boundary[DOWN]
+            and self.velocity.y > 0
+            and cell_neighbors[DOWN] is not None
+            and maze.cells[cell_neighbors[DOWN]].walls[UP]
+        ):
+            self.velocity.y = 0
+        if (
+            crossing_boundary[LEFT]
+            and self.velocity.x < 0
+            and cell_neighbors[LEFT] is not None
+            and maze.cells[cell_neighbors[LEFT]].walls[RIGHT]
+        ):
+            self.velocity.x = 0
+        if (
+            crossing_boundary[RIGHT]
+            and self.velocity.x > 0
+            and cell_neighbors[RIGHT] is not None
+            and maze.cells[cell_neighbors[RIGHT]].walls[LEFT]
+        ):
+            self.velocity.x = 0
+
         # 4. Move the character using frame-rate independent math
         self.position += self.velocity * dt
+
+        # 5. Making player not skew itsefl
+        # --- VERTEX / CORNER COLLISION CORRECTION ---
+        # 1. Find the absolute closest grid intersection (vertex) to the player
+        vx = round(self.position.x / TILE_SIZE) * TILE_SIZE
+        vy = round(self.position.y / TILE_SIZE) * TILE_SIZE
+
+        # DEBUG_CIRC = (vx, vy)
+
+        # 2. Convert that vertex to grid line indices
+        vi = int(vx // TILE_SIZE)
+        vj = int(vy // TILE_SIZE)
+
+        # 3. Safe check: Does this vertex have an active wall attached to it?
+        vertex_has_wall = False
+
+        # Check the 4 cells surrounding this vertex intersection safely within bounds
+        # Top-Left cell: (vi-1, vj-1), Top-Right: (vi, vj-1)
+        # Bottom-Left: (vi-1, vj),   Bottom-Right: (vi, vj)
+
+        # if vj * COLS + vi not in maze.to_highlight:
+        #     maze.to_highlight = [vj * COLS + vi]
+
+        # North wall segment (up from vertex)
+        if 0 <= vi < COLS and 0 <= vj - 1 < ROWS:
+            if maze.cells[vj - 1 * COLS + vi].walls[
+                LEFT
+            ]:  # Bottom-Right's top neighbor's left wall
+                vertex_has_wall = True
+
+        # South wall segment (down from vertex)
+        if 0 <= vi < COLS and 0 <= vj < ROWS:
+            if maze.cells[vj * COLS + vi].walls[LEFT]:
+                vertex_has_wall = True
+
+        # West wall segment (left from vertex)
+        if 0 <= vi - 1 < COLS and 0 <= vj < ROWS:
+            if maze.cells[vj * COLS + (vi - 1)].walls[UP]:
+                vertex_has_wall = True
+
+        # East wall segment (right from vertex)
+        if 0 <= vi < COLS and 0 <= vj < ROWS:
+            if maze.cells[vj * COLS + vi].walls[UP]:
+                vertex_has_wall = True
+
+        # 4. If the vertex is solid, check circle-to-point collision
+        if vertex_has_wall:
+            vertex_pos = pygame.Vector2(vx, vy)
+            to_player = self.position - vertex_pos
+            distance = to_player.length()
+
+            # If inside the radius, we are colliding with the sharp tip/corner!
+            if distance < self.radius and distance > 0:
+                overlap = self.radius - distance
+
+                # Push the player directly away from the vertex point
+                self.position += to_player.normalize() * overlap
 
     def create_rays(self, walls, n=50):
         # ray = Ray((WIDTH / 2, HEIGHT / 2), (x, y))
@@ -268,7 +386,7 @@ class Player:
         return self.rays, self.wall_positions, self.wall_distances
 
     def render(self, screen: pygame.Surface):
-        pygame.draw.circle(screen, "blue", self.position, 10 * SCALE)
+        pygame.draw.circle(screen, "blue", self.position, self.radius)
 
         ray = Ray.from_angle(self.position.xy, self.direction)
         ray.render(screen, 50 * SCALE, "red")
@@ -378,6 +496,7 @@ class Maze:
 
     def __init__(self):
         self.cells: list[Cell] = []
+        self.to_highlight = []
         self.reset_tiles()
 
     def reset_maze(self):
@@ -394,6 +513,8 @@ class Maze:
     def render(self, screen: pygame.Surface, DEBUG=False):
         for cell in self.cells:
             cell.render(screen, DEBUG=DEBUG)
+
+        self.highlight_cells(screen, self.to_highlight, "green", DEBUG)
 
     def highlight_cell(self, screen: pygame.Surface, index, color="red", DEBUG=False):
         self.cells[index].render(
@@ -441,6 +562,7 @@ class Maze:
                 pos[idx] = None
                 continue
 
+        pos = [int(idx) if idx is not None else None for idx in pos]
         return pos
 
     @staticmethod
@@ -661,7 +783,7 @@ class Game:
     def __init__(self):
         self.maze = Maze()
         self.player = Player((0, 0))
-        # self.walls = maze.get_walls()
+
         self.wall_size = SCREEN_WIDTH
         self.no_of_rays = 200
         self.max_depth = 800
@@ -676,7 +798,9 @@ class Game:
 
         _, start_index = self.maze.get_random_cell()
         # TODO: MAKE IT POINT IN OPEN SPACE
-        self.player.position = self.maze.get_cell_center(start_index)
+        position = self.maze.get_cell_center(start_index)
+        self.player.position.x = position[0]
+        self.player.position.y = position[1]
         self.player.direction = 0
         self.maze.setup_maze(start_index, self.maze_type)
 
@@ -690,7 +814,7 @@ class Game:
         # for line in walls:
         #     line.render(map, "grey")
 
-        self.player.update_position(dt)
+        self.player.update_position(dt, self.maze)
 
         # rays, wall_positions, wall_distances = player.create_rays(walls, no_of_rays)
         # corrected_distances = []
@@ -751,6 +875,7 @@ game = Game()
 
 
 def main():
+    global TILE_INDEX, TILE_SIZE, ROWS, COLS, SCALE, TILE_OPTIONS
     running = True
     dt = 0
 
@@ -795,6 +920,8 @@ def main():
                     game.set_game()
 
         game.update_and_render(map, render, dt)
+
+        # pygame.draw.circle(screen, "red", DEBUG_CIRC, 5)
 
         pygame.display.update()
         dt = clock.tick(60) / 1000
