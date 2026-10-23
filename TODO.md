@@ -38,3 +38,5 @@
 - [x] Implement BFS maze generation algorithm
 - [x] Implement Hunt-and-Kill maze generation algorithm
 - [x] Better movement controls
+- [x] implement dda algorithm
+- [x] make it so game world works!!

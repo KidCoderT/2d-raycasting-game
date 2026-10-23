@@ -127,7 +127,7 @@ class Ray:
         )
 
     @classmethod
-    def from_angle(cls, origin, azimutal_angle):
+    def from_angle(cls, origin, azimutal_angle) -> Ray:
         vector = pygame.Vector2()
         vector.from_polar((1, azimutal_angle))
         assert vector.is_normalized()
@@ -135,7 +135,7 @@ class Ray:
         towards_vec = og_vec + vector
         return Ray(origin, (towards_vec.x, towards_vec.y))
 
-    def cast_dda(self, maze: Maze, screen: pygame.Surface):
+    def cast_dda(self, maze: Maze, screen: pygame.Surface | None = None):
         ox, oy = self.origin
         dx, dy = self.direction.xy
         if dx == 0 and dy == 0:
@@ -216,14 +216,16 @@ class Ray:
             #     break
 
         t = (side_x - t_delta_x) if side == "vertical" else (side_y - t_delta_y)
-        # return ((ox + t * dx, oy + t * dy), t)
 
-        pygame.draw.circle(
-            screen,
-            "lightgreen",
-            (ox + t * dx, oy + t * dy),
-            5,
-        )
+        if DEBUG and screen is not None:
+            pygame.draw.circle(
+                screen,
+                "lightgreen",
+                (ox + t * dx, oy + t * dy),
+                5,
+            )
+
+        return ((ox + t * dx, oy + t * dy), t)
 
 
 class Player:
@@ -467,8 +469,33 @@ class Player:
                 # Push the player directly away from the vertex point
                 self.position += to_player.normalize() * overlap
 
+    def create_rays(self, maze, n=50):
+        # ray = Ray((WIDTH / 2, HEIGHT / 2), (x, y))
+        self.rays: list[Ray] = [
+            Ray.from_angle(
+                self.position.xy,
+                (self.direction - (self.fov / 2)) + (self.fov / n) * i,
+            )
+            for i in range(n)
+        ]
+        self.wall_distances = []
+        self.wall_positions = []
+        # rays = [Ray.from_angle(player.position.xy, player.direction)]
+
+        for ray in self.rays:
+            result = ray.cast_dda(maze)  # was: ray.cast(wall) over all walls
+            if result is None:
+                self.wall_positions.append(None)
+                self.wall_distances.append(math.inf)
+                continue
+            point, dist = result  # dist = path length along the ray
+            self.wall_positions.append(point)
+            self.wall_distances.append(dist)
+
+        return self.rays, self.wall_positions, self.wall_distances
+
     # OLD CODE
-    def create_rays(self, walls, n=50):
+    def create_rays_old(self, walls, n=50):
         # ray = Ray((WIDTH / 2, HEIGHT / 2), (x, y))
         self.rays: list[Ray] = [
             Ray.from_angle(
@@ -486,7 +513,7 @@ class Player:
             min_dist = math.inf
             point = None
             for wall in walls:
-                out = ray.cast(wall)
+                out = ray.cast_dda(wall)
 
                 if out is None:
                     continue
@@ -505,16 +532,16 @@ class Player:
         pygame.draw.circle(screen, "blue", self.position, self.radius)
 
         # rays = [Ray.from_angle(self.position.xy, self.direction)]
-        rays = [
-            Ray.from_angle(
-                self.position.xy,
-                (self.direction - (self.fov / 2)) + (self.fov / 50) * i,
-            )
-            for i in range(50)
-        ]
-        for ray in rays:
-            ray.render(screen, 200 * SCALE, "red")
-            ray.cast_dda(maze, screen)
+        # rays = [
+        #     Ray.from_angle(
+        #         self.position.xy,
+        #         (self.direction - (self.fov / 2)) + (self.fov / 50) * i,
+        #     )
+        #     for i in range(50)
+        # ]
+        # for ray in rays:
+        #     ray.render(screen, 200 * SCALE, "red")
+        #     ray.cast_dda(maze, screen)
 
 
 class Cell:
@@ -949,28 +976,30 @@ class Game:
 
         self.player.update_position(dt, self.maze)
 
-        # rays, wall_positions, wall_distances = player.create_rays(walls, no_of_rays)
-        # corrected_distances = []
-        # wall_heights = []
-        # alpha_values = []
+        rays, wall_positions, wall_distances = self.player.create_rays(
+            self.maze, self.no_of_rays
+        )
+        corrected_distances = []
+        wall_heights = []
+        alpha_values = []
 
-        # for i in range(len(rays)):
-        #     if wall_positions[i] is not None:
-        #         rays[i].render(map, wall_distances[i])
-        #         pygame.draw.circle(map, "red", wall_positions[i], 5)
-        #
-        #     correct_dist = wall_distances[i] * math.cos(
-        #         (i * (player.fov / no_of_rays) - (player.fov / 2)) * (math.pi / 180)
-        #     )
-        #
-        #     wall_height = (wall_size * 15) / correct_dist
-        #
-        #     factor = pygame.math.clamp(1 - (wall_distances[i] / max_depth), 0, 1)
-        #
-        #     corrected_distances.append(correct_dist)
-        #     wall_heights.append(wall_height)
-        #     alpha_values.append(factor * 255)
-        #
+        for i in range(len(rays)):
+            if wall_positions[i] is not None:
+                rays[i].render(map, wall_distances[i])
+                pygame.draw.circle(map, "red", wall_positions[i], 5)
+
+            correct_dist = wall_distances[i] * math.cos(
+                (i * (self.player.fov / self.no_of_rays) - (self.player.fov / 2))
+                * (math.pi / 180)
+            )
+
+            wall_height = (self.wall_size * 15) / correct_dist
+
+            factor = pygame.math.clamp(1 - (wall_distances[i] / self.max_depth), 0, 1)
+
+            corrected_distances.append(correct_dist)
+            wall_heights.append(wall_height)
+            alpha_values.append(factor * 255)
 
         if DEBUG:
             for i in range(COLS):
@@ -992,16 +1021,16 @@ class Game:
         self.maze.render(map)
 
         # MAKEING THE PLAYER VIEW
-        # render.fill("black")
-        #
-        # box_width = (WIDTH / 2) / no_of_rays
-        # for i in range(no_of_rays):
-        #     wall_top = (HEIGHT / 2) - (wall_heights[i] / 2)
-        #     pygame.draw.rect(
-        #         render,
-        #         pygame.Color(alpha_values[i], alpha_values[i], alpha_values[i]),
-        #         pygame.Rect(i * box_width, wall_top, box_width + 1, wall_heights[i]),
-        #     )
+        render.fill("black")
+
+        box_width = (WIDTH) / self.no_of_rays
+        for i in range(self.no_of_rays):
+            wall_top = (HEIGHT / 2) - (wall_heights[i] / 2)
+            pygame.draw.rect(
+                render,
+                pygame.Color(alpha_values[i], alpha_values[i], alpha_values[i]),
+                pygame.Rect(i * box_width, wall_top, box_width + 1, wall_heights[i]),
+            )
 
         # try:
         #     self.player.rays[0].cast_dda(self.maze, map)
