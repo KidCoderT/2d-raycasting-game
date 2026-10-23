@@ -1,6 +1,8 @@
 import math
 import random
 import sys
+from logging import DEBUG
+from turtle import xcor
 
 import pygame
 
@@ -23,7 +25,7 @@ print(HCF)
 
 # 640, 720 -> 320, 360 -> 160, 180 -> 80, 90 -> 40, 45
 TILE_OPTIONS = [90, 72, 36, 24, 18, 9, 3]
-TILE_INDEX = 2
+TILE_INDEX = 1
 
 TILE_SIZE = TILE_OPTIONS[TILE_INDEX]
 ROWS, COLS = HEIGHT // TILE_SIZE, WIDTH // TILE_SIZE
@@ -82,6 +84,7 @@ class Ray:
         self.direction = pygame.Vector2(
             towards[0] - origin[0], towards[1] - origin[1]
         ).normalize()
+        self.slope = self.direction.y / self.direction.x if self.direction.x else None
 
     def render(self, screen, length, color="red"):
         end = (
@@ -90,7 +93,7 @@ class Ray:
         )
         pygame.draw.line(screen, color, self.origin, end)
 
-    def cast(self, wall: Wall):
+    def cast_old(self, wall: Wall):
         # check if wall and ray ||
         if wall.direction.angle == self.direction.angle:
             return
@@ -131,6 +134,96 @@ class Ray:
         og_vec = pygame.Vector2(*origin)
         towards_vec = og_vec + vector
         return Ray(origin, (towards_vec.x, towards_vec.y))
+
+    def cast_dda(self, maze: Maze, screen: pygame.Surface):
+        ox, oy = self.origin
+        dx, dy = self.direction.xy
+        if dx == 0 and dy == 0:
+            return None
+
+        cx = int(math.floor(ox / TILE_SIZE))
+        cy = int(math.floor(oy / TILE_SIZE))
+
+        step_x = 1 if dx > 0 else -1
+        step_y = 1 if dy > 0 else -1
+
+        t_delta_x = abs(TILE_SIZE / dx) if dx != 0 else math.inf
+        t_delta_y = abs(TILE_SIZE / dy) if dy != 0 else math.inf
+
+        if dx > 0:
+            side_x = ((cx + 1) * TILE_SIZE - ox) / dx
+        elif dx < 0:
+            side_x = (ox - cx * TILE_SIZE) / (-dx)
+        else:
+            side_x = math.inf
+
+        if dy > 0:
+            side_y = ((cy + 1) * TILE_SIZE - oy) / dy
+        elif dy < 0:
+            side_y = (oy - cy * TILE_SIZE) / (-dy)
+        else:
+            side_y = math.inf
+
+        side = None
+        hit = False
+        steps = 0
+
+        while True:
+            if side_x < side_y:
+                cx += step_x
+                side_x += t_delta_x
+                side = "vertical"
+            else:
+                cy += step_y
+                side_y += t_delta_y
+                side = "horizontal"
+
+            steps += 1
+
+            # off the map with no wall: ray escapes
+            if not (0 <= cy < ROWS and 0 <= cx < COLS):
+                return None
+
+            # edge-based wall test (the DDA-equivalent of grid[cy][cx] == SOLID)
+            cell = maze.cells[cy * COLS + cx]
+
+            # side == "vertical"  -> we crossed a vertical line (stepped in X):
+            #   the boundary is this cell's LEFT (if we moved right) or RIGHT wall.
+            # side == "horizontal" -> crossed a horizontal line (stepped in Y):
+            #   the boundary is this cell's UP (downward) or DOWN (upward) wall.
+            # Each wall is stored in both cells that share it, so the current cell is enough.
+            if side == "vertical":
+                if step_x > 0 and cell.walls[LEFT]:
+                    break
+                if step_x < 0 and cell.walls[RIGHT]:
+                    break
+            else:
+                if step_y > 0 and cell.walls[UP]:
+                    break
+                if step_y < 0 and cell.walls[DOWN]:
+                    break
+
+            if steps > 100:
+                return None
+
+            # if (
+            #     (side == "vertical" and step_x > 0 and cell.walls[RIGHT])
+            #     or (side == "vertical" and step_x < 0 and cell.walls[LEFT])
+            #     or (side == "horizontal" and step_y > 0 and cell.walls[DOWN])
+            #     or (side == "horizontal" and step_y < 0 and cell.walls[UP])
+            # ):
+            #     hit = True
+            #     break
+
+        t = (side_x - t_delta_x) if side == "vertical" else (side_y - t_delta_y)
+        # return ((ox + t * dx, oy + t * dy), t)
+
+        pygame.draw.circle(
+            screen,
+            "lightgreen",
+            (ox + t * dx, oy + t * dy),
+            5,
+        )
 
 
 class Player:
@@ -185,6 +278,7 @@ class Player:
 
     def update_position(self, dt, maze: Maze):
         # global DEBUG_CIRC
+        gap = 2 * SCALE
         keys = pygame.key.get_pressed()
 
         if keys[pygame.K_a] or keys[pygame.K_LEFT]:
@@ -252,45 +346,64 @@ class Player:
         crossing_boundary = [False, False, False, False]  # TOP, RIGHT, BOTTOM, LEFT
         i, j = self.position.x // TILE_SIZE, self.position.y // TILE_SIZE
 
-        if abs(j * TILE_SIZE - self.position.y) <= self.radius + 2:
+        if abs(j * TILE_SIZE - self.position.y) <= self.radius + gap:
             crossing_boundary[UP] = True
-        if abs((j + 1) * TILE_SIZE - self.position.y) <= self.radius + 2:
+        if abs((j + 1) * TILE_SIZE - self.position.y) <= self.radius + gap:
             crossing_boundary[DOWN] = True
         if abs(i * TILE_SIZE - self.position.x) <= self.radius + 2:
             crossing_boundary[LEFT] = True
-        if abs((i + 1) * TILE_SIZE - self.position.x) <= self.radius + 2:
+        if abs((i + 1) * TILE_SIZE - self.position.x) <= self.radius + gap:
             crossing_boundary[RIGHT] = True
 
-        cell_neighbors = maze.get_neighbors_indices(maze.pos_to_index(i, j))
+        cell_idx = int(maze.pos_to_index(i, j))
+        cell_neighbors = maze.get_neighbors_indices(cell_idx)
 
-        if (
-            crossing_boundary[UP]
-            and self.velocity.y < 0
-            and cell_neighbors[UP] is not None
-            and maze.cells[cell_neighbors[UP]].walls[DOWN]
-        ):
-            self.velocity.y = 0
-        if (
-            crossing_boundary[DOWN]
-            and self.velocity.y > 0
-            and cell_neighbors[DOWN] is not None
-            and maze.cells[cell_neighbors[DOWN]].walls[UP]
-        ):
-            self.velocity.y = 0
-        if (
-            crossing_boundary[LEFT]
-            and self.velocity.x < 0
-            and cell_neighbors[LEFT] is not None
-            and maze.cells[cell_neighbors[LEFT]].walls[RIGHT]
-        ):
-            self.velocity.x = 0
-        if (
-            crossing_boundary[RIGHT]
-            and self.velocity.x > 0
-            and cell_neighbors[RIGHT] is not None
-            and maze.cells[cell_neighbors[RIGHT]].walls[LEFT]
-        ):
-            self.velocity.x = 0
+        if crossing_boundary[UP] and self.velocity.y < 0:
+            current_cell_has_wall = maze.cells[cell_idx].walls[UP]
+            if j > 0:
+                neighbor_cell = cell_neighbors[UP]
+                assert neighbor_cell is not None
+                neighbor_has_wall = maze.cells[neighbor_cell].walls[DOWN]
+            else:
+                neighbor_has_wall = True
+
+            if current_cell_has_wall or neighbor_has_wall:
+                self.velocity.y = 0
+
+        if crossing_boundary[DOWN] and self.velocity.y > 0:
+            current_cell_has_wall = maze.cells[cell_idx].walls[DOWN]
+            if j < ROWS - 1:
+                neighbor_cell = cell_neighbors[DOWN]
+                assert neighbor_cell is not None
+                neighbor_has_wall = maze.cells[neighbor_cell].walls[UP]
+            else:
+                neighbor_has_wall = True
+
+            if current_cell_has_wall or neighbor_has_wall:
+                self.velocity.y = 0
+
+        if crossing_boundary[LEFT] and self.velocity.x < 0:
+            current_cell_has_wall = maze.cells[cell_idx].walls[LEFT]
+            if i > 0:
+                neighbor_cell = cell_neighbors[LEFT]
+                assert neighbor_cell is not None
+                neighbor_has_wall = maze.cells[neighbor_cell].walls[RIGHT]
+            else:
+                neighbor_has_wall = True
+
+            if current_cell_has_wall or neighbor_has_wall:
+                self.velocity.x = 0
+        if crossing_boundary[RIGHT] and self.velocity.x > 0:
+            current_cell_has_wall = maze.cells[cell_idx].walls[RIGHT]
+            if i < COLS - 1:
+                neighbor_cell = cell_neighbors[RIGHT]
+                assert neighbor_cell is not None
+                neighbor_has_wall = maze.cells[neighbor_cell].walls[LEFT]
+            else:
+                neighbor_has_wall = True
+
+            if current_cell_has_wall or neighbor_has_wall:
+                self.velocity.x = 0
 
         # 4. Move the character using frame-rate independent math
         self.position += self.velocity * dt
@@ -318,26 +431,28 @@ class Player:
         #     maze.to_highlight = [vj * COLS + vi]
 
         # North wall segment (up from vertex)
-        if 0 <= vi < COLS and 0 <= vj - 1 < ROWS:
-            if maze.cells[vj - 1 * COLS + vi].walls[
-                LEFT
-            ]:  # Bottom-Right's top neighbor's left wall
-                vertex_has_wall = True
+        if (
+            0 <= vi < COLS
+            and 0 <= vj < ROWS
+            and maze.cells[(vj - 1) * COLS + vi].walls[LEFT]
+        ):  # Bottom-Right's top neighbor's left wall
+            vertex_has_wall = True
 
         # South wall segment (down from vertex)
-        if 0 <= vi < COLS and 0 <= vj < ROWS:
-            if maze.cells[vj * COLS + vi].walls[LEFT]:
-                vertex_has_wall = True
+        if 0 <= vi < COLS and 0 <= vj < ROWS and maze.cells[vj * COLS + vi].walls[LEFT]:
+            vertex_has_wall = True
 
         # West wall segment (left from vertex)
-        if 0 <= vi - 1 < COLS and 0 <= vj < ROWS:
-            if maze.cells[vj * COLS + (vi - 1)].walls[UP]:
-                vertex_has_wall = True
+        if (
+            0 <= vi - 1 < COLS
+            and 0 <= vj < ROWS
+            and maze.cells[vj * COLS + (vi - 1)].walls[UP]
+        ):
+            vertex_has_wall = True
 
         # East wall segment (right from vertex)
-        if 0 <= vi < COLS and 0 <= vj < ROWS:
-            if maze.cells[vj * COLS + vi].walls[UP]:
-                vertex_has_wall = True
+        if 0 <= vi < COLS and 0 <= vj < ROWS and maze.cells[vj * COLS + vi].walls[UP]:
+            vertex_has_wall = True
 
         # 4. If the vertex is solid, check circle-to-point collision
         if vertex_has_wall:
@@ -346,15 +461,16 @@ class Player:
             distance = to_player.length()
 
             # If inside the radius, we are colliding with the sharp tip/corner!
-            if distance < self.radius and distance > 0:
-                overlap = self.radius - distance
+            if distance < self.radius + gap and distance > 0:
+                overlap = (self.radius + gap) - distance
 
                 # Push the player directly away from the vertex point
                 self.position += to_player.normalize() * overlap
 
+    # OLD CODE
     def create_rays(self, walls, n=50):
         # ray = Ray((WIDTH / 2, HEIGHT / 2), (x, y))
-        self.rays = [
+        self.rays: list[Ray] = [
             Ray.from_angle(
                 self.position.xy,
                 (self.direction - (self.fov / 2)) + (self.fov / n) * i,
@@ -385,11 +501,20 @@ class Player:
 
         return self.rays, self.wall_positions, self.wall_distances
 
-    def render(self, screen: pygame.Surface):
+    def render(self, screen: pygame.Surface, maze: Maze):
         pygame.draw.circle(screen, "blue", self.position, self.radius)
 
-        ray = Ray.from_angle(self.position.xy, self.direction)
-        ray.render(screen, 50 * SCALE, "red")
+        # rays = [Ray.from_angle(self.position.xy, self.direction)]
+        rays = [
+            Ray.from_angle(
+                self.position.xy,
+                (self.direction - (self.fov / 2)) + (self.fov / 50) * i,
+            )
+            for i in range(50)
+        ]
+        for ray in rays:
+            ray.render(screen, 200 * SCALE, "red")
+            ray.cast_dda(maze, screen)
 
 
 class Cell:
@@ -492,7 +617,7 @@ class Maze:
 
     @staticmethod
     def pos_to_index(i, j):
-        return j * COLS + i
+        return int(j * COLS + i)
 
     def __init__(self):
         self.cells: list[Cell] = []
@@ -508,6 +633,14 @@ class Maze:
         for index in range(ROWS * COLS):
             cell = Cell(*Maze.index_to_ij(index))
             assert cell.index == index
+            if cell.i == 0:
+                cell.walls[LEFT] = True
+            if cell.j == 0:
+                cell.walls[UP] = True
+            if cell.i == ROWS - 1:
+                cell.walls[RIGHT] = True
+            if cell.j == COLS - 1:
+                cell.walls[DOWN] = True
             self.cells.append(cell)
 
     def render(self, screen: pygame.Surface, DEBUG=False):
@@ -839,7 +972,23 @@ class Game:
         #     alpha_values.append(factor * 255)
         #
 
-        self.player.render(map)
+        if DEBUG:
+            for i in range(COLS):
+                pygame.draw.line(
+                    map,
+                    pygame.Color("#323232"),
+                    (i * TILE_SIZE, 0),
+                    (i * TILE_SIZE, HEIGHT),
+                )
+                for j in range(ROWS):
+                    pygame.draw.line(
+                        map,
+                        pygame.Color("#323232"),
+                        (0, j * TILE_SIZE),
+                        (WIDTH, j * TILE_SIZE),
+                    )
+
+        self.player.render(map, self.maze)  # TODO REMOVE MAZE
         self.maze.render(map)
 
         # MAKEING THE PLAYER VIEW
@@ -854,21 +1003,16 @@ class Game:
         #         pygame.Rect(i * box_width, wall_top, box_width + 1, wall_heights[i]),
         #     )
 
+        # try:
+        #     self.player.rays[0].cast_dda(self.maze, map)
+        #     print("running")
+        # except:
+        #     pass
+
         screen.blit(map, (0, 0))
         screen.blit(render, (WIDTH, 0))
 
         pygame.draw.line(screen, "white", (WIDTH, 0), (WIDTH, HEIGHT))
-
-
-# walls: list[Wall] = [
-#     Wall((-1, -1), (WIDTH, -1)),
-#     Wall((-1, -1), (-1, HEIGHT)),
-#     Wall((WIDTH, HEIGHT), (-1, HEIGHT)),
-#     Wall((WIDTH, HEIGHT), (WIDTH, -1)),
-# ]
-#
-# for shape in shape_list:
-#     walls.extend(Wall.decompose_polygon(shape))
 
 
 game = Game()
